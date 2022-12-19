@@ -8,19 +8,19 @@ namespace ThreadedRipperUnitTests {
 		public void TestBench() {
 			ThreadedRipper tr = new ThreadedRipper();
 			PrivateObject po = new PrivateObject(tr);
-			int startIndex = 0;
-			string INPUT = "*'a we're O'hare 198a2       'ave 'snow' eves'     ";
+			List<string> EXPECTED = new List<string>() { "a", "we're", "O'hare", "198a2", "lil", "ave", "snow", "eves" };
+			List<string> ACTUAL = new List<string>();
 
+			int startIndex = 0;
+			string INPUT = "*'a we're O'hare 198a2   lil,'     'ave 'snow' eves'     '";
 			object[] args = new object[] { INPUT, startIndex };
+
 			string? token = (string?)po.Invoke("_getNextToken", args);
 			while(token != null) {
-				if( token == null ) {
-					Console.WriteLine("null");
-				} else {
-					Console.WriteLine( "HEAD " + args[1] + " -- " + token);
-				}
+				ACTUAL.Add(token);
 				token = (string?)po.Invoke("_getNextToken", args);
 			}
+			CollectionAssert.AreEqual(EXPECTED, ACTUAL);
 		}
 	}
 }

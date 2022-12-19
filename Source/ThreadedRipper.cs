@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -11,23 +12,36 @@ namespace _22_1217_ {
 		
 		int seekPosition = 0;
 		int length = 0;
-		int BUFSZ = 524288;
+		int BUFSZ = 52428;
 
 		public ThreadedRipper() {
 		}
 
-		public ThreadedRipper(string s) {
+		public ThreadedRipper(string pathname) {
+			byte[] BUF = new byte[BUFSZ];
+			FileStream fileStream = new FileStream(pathname, FileMode.Open, FileAccess.Read, FileShare.Read);
+			fileStream.Read(BUF, seekPosition, BUFSZ);
+			
+			string chunk = System.Text.Encoding.ASCII.GetString(BUF);
+			int chunkSeek = 0;
+			string? token = _getNextToken(chunk, ref chunkSeek);
+			Dictionary<string, int> frequency = new Dictionary<string, int>();
+			while(token != null) {
+				if(frequency.ContainsKey(token)) {
+					frequency[token] = frequency[token] + 1;
+				} else {
+					frequency.Add(token, 1);
+				}
+				token = _getNextToken(chunk, ref chunkSeek);
+			}
 
+
+			frequency.AsParallel().ForAll(entry => Console.WriteLine(entry.Key + " - " + entry.Value));
 			//ThreadPool.QueueUserWorkItem(RipTextThread);
 		}
 
-		public ThreadedRipper(FileStream file) {
-
-		}
-
-
 		static void RipTextThread(object? state) {
-			// Each thread begins tokenizing the chunk of bytes it receives and updating a shared resource with tally
+			// Each thread begins tokenizing the chunk of bytes it receives and updating a shared frequency count object 
 		}
 
 
@@ -57,48 +71,38 @@ namespace _22_1217_ {
 		 *     startIndex is updated with the index where processing left off
 		 */
 		private string? _getNextToken(string buf, ref int startIndex) {
-			// TODO: cleanup
 			if(startIndex >= buf.Length) {
 				return null;
 			}
 			int seek = startIndex;
+			string? retVal = null;
 			while(seek < buf.Length) {
 				char c = buf[seek];
 				if(!isAlphaNum(c)) {
-					if(c == '\'') { // only want a lookahead when ' is encountered
-						if(seek + 1 >= buf.Length) {
-							string retVal = buf.Substring(startIndex, seek - startIndex);
-							startIndex = ++seek;
-							return retVal; // end processing
-						} else if (!isAlphaNum(buf[seek + 1])) {
-							string retVal = buf.Substring(startIndex, seek - startIndex);
-							startIndex = ++seek;
-							return retVal;
-						} else {
-							if(seek == startIndex) {
-								startIndex = ++seek;	
-							} else {
-								seek++;
-							}
-						}
+					int peek = seek + 1;
+					// peek doesn't land in EOF
+					// not the first character examined
+					// peek is alpha-numerical
+					if(c == '\'' &&  peek < buf.Length && seek != startIndex && isAlphaNum(buf[peek])) {
+						seek++; continue; // include in token and continue to next character
+
 					} else if(seek == startIndex) {
-						startIndex = ++seek;
+						startIndex = ++seek; // advance token start mark, eating up symbol
+						continue;
 					} else {
-						string retVal = buf.Substring(startIndex, seek - startIndex);
-						startIndex = ++seek;
-						return retVal;
+						break; // signal token is ready to be cut out
 					}
-				} else {
-					seek++;
+
 				}
-				
+				seek++;
 			}
-			if(startIndex == seek || seek > startIndex) {
+
+			retVal = buf.Substring(startIndex, seek - startIndex);
+			startIndex = seek;
+			if(retVal.Length == 0) {
 				return null;
 			}
-			string val = buf.Substring(startIndex, seek - startIndex);
-			startIndex = seek;
-			return val;
+			return retVal;
 		}
 		
 		public static bool isAlphaNum(char c) {
