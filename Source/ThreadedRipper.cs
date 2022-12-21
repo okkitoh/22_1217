@@ -22,8 +22,8 @@ namespace _22_1217_ {
 
 		public async Task<Dictionary<string, int>> GetWordFrequency() {
 			return await Task.Run(() => {
+				frequency.Clear();
 				if(fHandle == null) {
-					frequency.Clear();
 					return frequency;
 				}
 					
@@ -33,19 +33,13 @@ namespace _22_1217_ {
 				byte[] BUF = new byte[BUFSZ];
 
 				while((fseek = fHandle.Read(BUF, 0, BUFSZ)) > 0) {
-					Console.WriteLine("head: " + head + " / " + fHandle.Length);
 					string text = ASCII_ENCODE.GetString(BUF);
 					int adjustedLen = fseek;
-					string token = _getNextRToken(text, ref adjustedLen) ?? "";
-					synchronousRipperWork(text.Substring(0, adjustedLen)); /* creating new buffer but this will be necessary for threads */
-
-					Console.WriteLine("last token: "+token+", ("+fseek+" | "+text.Substring(0, 7)+" ... "+text.Substring(text.Length - 7)+")");
-					if(fseek < BUFSZ) {
-						adjustedLen = fseek; // last iteration, put token back into text chunk
-						tallyWord(token);
-						Console.WriteLine("Work Complete\n--- exiting ---");
-						break;
+					if(fseek >= BUFSZ) {
+						_getNextRToken(text, ref adjustedLen);
 					}
+					//ThreadPool.QueueUserWorkItem(RipperWork, text.Substring(0, adjustedLen)); #need a custom AutoResetEvent
+					synchronousRipperWork(text.Substring(0, adjustedLen)); /* creating new buffer but this will be necessary for threads */
 					head = head + adjustedLen;
 					fHandle.Position = head;
 					BUF = new byte[BUFSZ];
@@ -53,16 +47,16 @@ namespace _22_1217_ {
 				return frequency;
 			});
 		}
+
+
 		private void synchronousRipperWork(string text) {
 			int tseek = 0;
 			string? token = _getNextToken(text, ref tseek);
-			frequency = new Dictionary<string,int>();
 			while (token != null) {
 				tallyWord(token);
 				token = _getNextToken(text,ref tseek);
 			}
 		}
-		
 		private void tallyWord(string token) {
 			if(this.frequency.ContainsKey(token)) {
 				this.frequency[token]+= 1;
