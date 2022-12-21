@@ -13,6 +13,10 @@ namespace _22_1217_ {
 			string path = Directory.GetCurrentDirectory();
 			path = path.Substring(0, path.IndexOf("Source\\")) + "Resources\\WarAndPeace.txt";
 			ThreadedRipper tr = new ThreadedRipper(path);
+			Task<Dictionary<string, int>> task = tr.GetWordFrequency();
+			task.Wait();
+			Dictionary<string, int> dict = task.Result;
+			dict.AsParallel().ForAll((kv) => Console.WriteLine(kv.Key + ": " + kv.Value));
 		}
 	}
 }

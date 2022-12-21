@@ -9,54 +9,66 @@ using System.Threading.Tasks;
 
 namespace _22_1217_ {
 	public class ThreadedRipper {
+		const int BUFSZ = (1024*1024)/2;
+		FileStream? fHandle;
+		Dictionary<string, int> frequency = new Dictionary<string, int>();
 		
-		int seekPosition = 0;
-		int length = 0;
-		int BUFSZ = 52428;
-
 		public ThreadedRipper() {
+			fHandle = null;
 		}
-
 		public ThreadedRipper(string pathname) {
-			byte[] BUF = new byte[BUFSZ];
-			FileStream fileStream = new FileStream(pathname, FileMode.Open, FileAccess.Read, FileShare.Read);
-			fileStream.Read(BUF, seekPosition, BUFSZ);
-			
-			string chunk = System.Text.Encoding.ASCII.GetString(BUF);
-			int chunkSeek = 0;
-			string? token = _getNextToken(chunk, ref chunkSeek);
-			Dictionary<string, int> frequency = new Dictionary<string, int>();
-			while(token != null) {
-				if(frequency.ContainsKey(token)) {
-					frequency[token] = frequency[token] + 1;
-				} else {
-					frequency.Add(token, 1);
+			fHandle = new FileStream(pathname, FileMode.Open, FileAccess.Read, FileShare.Read);
+		}
+
+		public async Task<Dictionary<string, int>> GetWordFrequency() {
+			return await Task.Run(() => {
+				if(fHandle == null) {
+					frequency.Clear();
+					return frequency;
 				}
-				token = _getNextToken(chunk, ref chunkSeek);
+					
+				Encoding ASCII_ENCODE = new ASCIIEncoding();
+				int head = 0;
+				int fseek = 0;
+				byte[] BUF = new byte[BUFSZ];
+
+				while((fseek = fHandle.Read(BUF, 0, BUFSZ)) > 0) {
+					Console.WriteLine("head: " + head + " / " + fHandle.Length);
+					string text = ASCII_ENCODE.GetString(BUF);
+					int adjustedLen = fseek;
+					string token = _getNextRToken(text, ref adjustedLen) ?? "";
+					synchronousRipperWork(text.Substring(0, adjustedLen)); /* creating new buffer but this will be necessary for threads */
+
+					Console.WriteLine("last token: "+token+", ("+fseek+" | "+text.Substring(0, 7)+" ... "+text.Substring(text.Length - 7)+")");
+					if(fseek < BUFSZ) {
+						adjustedLen = fseek; // last iteration, put token back into text chunk
+						tallyWord(token);
+						Console.WriteLine("Work Complete\n--- exiting ---");
+						break;
+					}
+					head = head + adjustedLen;
+					fHandle.Position = head;
+					BUF = new byte[BUFSZ];
+				}
+				return frequency;
+			});
+		}
+		private void synchronousRipperWork(string text) {
+			int tseek = 0;
+			string? token = _getNextToken(text, ref tseek);
+			frequency = new Dictionary<string,int>();
+			while (token != null) {
+				tallyWord(token);
+				token = _getNextToken(text,ref tseek);
 			}
-
-
-			frequency.AsParallel().ForAll(entry => Console.WriteLine(entry.Key + " - " + entry.Value));
-			//ThreadPool.QueueUserWorkItem(RipTextThread);
 		}
-
-		static void RipTextThread(object? state) {
-			// Each thread begins tokenizing the chunk of bytes it receives and updating a shared frequency count object 
-		}
-
-
-		private string _chunkToWordBoundary(string input, int BUFSZ) {
-			// TODO: 
-			// Read from input or file handle at _(seek_position)
-			// Get BUFSZ amount of bytes
-			// If chunked text length is less than BUFSZ
-			//     signal EOF
-			//	   ret chunk
-			// If chunked text length is equal to BUFSZ
-			//     trim last token off end
-			//	   update startIndex by adjusted size
-			//	   ret chunk
-			return "";
+		
+		private void tallyWord(string token) {
+			if(this.frequency.ContainsKey(token)) {
+				this.frequency[token]+= 1;
+			} else {
+				this.frequency[token] = 1;
+			}
 		}
 
 		/* FUNCTION: _getNextToken(string, int *)
@@ -70,39 +82,48 @@ namespace _22_1217_ {
 		 * POSTCONDITION:
 		 *     startIndex is updated with the index where processing left off
 		 */
-		private string? _getNextToken(string buf, ref int startIndex) {
-			if(startIndex >= buf.Length) {
+		private string? _getToken(string buf, ref int startIndex, int direction) {
+			if(startIndex > buf.Length || startIndex < 0) {
 				return null;
 			}
-			int seek = startIndex;
+
+			int seek = (direction < 0 ? startIndex - 1 : startIndex);
+			startIndex = (direction < 0 ? seek : startIndex);
 			string? retVal = null;
-			while(seek < buf.Length) {
+			while(seek >= 0 && seek < buf.Length) {
 				char c = buf[seek];
 				if(!isAlphaNum(c)) {
-					int peek = seek + 1;
+					int peek = seek + direction;
 					// peek doesn't land in EOF
 					// not the first character examined
 					// peek is alpha-numerical
-					if(c == '\'' &&  peek < buf.Length && seek != startIndex && isAlphaNum(buf[peek])) {
-						seek++; continue; // include in token and continue to next character
-
+					// forgot about hypens, follows same rule
+					if((c == '\'' || c == '-') &&  (peek >= 0 && peek < buf.Length) && seek != startIndex && isAlphaNum(buf[peek])) {
+						seek += direction; continue; // include in token and continue to next character
 					} else if(seek == startIndex) {
-						startIndex = ++seek; // advance token start mark, eating up symbol
+						seek += direction;
+						startIndex += direction; // advance token start mark, eating up symbol
 						continue;
 					} else {
 						break; // signal token is ready to be cut out
 					}
-
 				}
-				seek++;
+				seek += direction;
 			}
-
-			retVal = buf.Substring(startIndex, seek - startIndex);
+			if(direction > 0) {
+				retVal = buf.Substring(startIndex, seek - startIndex);
+			} else {
+				retVal = buf.Substring(seek + 1, startIndex - seek);
+			}
 			startIndex = seek;
-			if(retVal.Length == 0) {
-				return null;
-			}
-			return retVal;
+			return (retVal == null || retVal.Length == 0 ? null : retVal);
+		}
+
+		private string? _getNextToken(string buf, ref int startIndex) {
+			return _getToken(buf, ref startIndex, 1);
+		}
+		private string? _getNextRToken(string buf, ref int startIndex) {
+			return _getToken(buf, ref startIndex, -1);
 		}
 		
 		public static bool isAlphaNum(char c) {
