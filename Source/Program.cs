@@ -14,14 +14,25 @@ namespace _22_1217_ {
 			string path = Directory.GetCurrentDirectory();
 			path = path.Substring(0, path.IndexOf("Source\\")) + "Resources\\WarAndPeace.txt";
 			ThreadedRipper tr = new ThreadedRipper(path);
+			ThreadedRipper tr2 = new ThreadedRipper(path);
+
 			Task<Dictionary<string, int>> task = tr.GetWordFrequency();
-			task.Wait();
+			Task<Dictionary<string, int>> task2 = tr2.GetWordFrequency();
+
+			Task.WhenAll(task, task2);
+			
+			
 			Dictionary<string, int> dict = task.Result;
 			int wc = dict.AsParallel().Aggregate(0, (acc, kv) => {
 				return acc + kv.Value;
 			});
-			//dict.AsParallel().ForAll((kv) => Console.WriteLine(kv.Key + ": " + kv.Value));
-			Console.Write("word count: " + wc);
+			Console.WriteLine("word count: " + wc);
+			
+			Dictionary<string, int> dict2 = task.Result;
+			wc = dict2.AsParallel().Aggregate(0, (acc, kv) => {
+				return acc + kv.Value;
+			});
+			Console.WriteLine("word count: " + wc);
 		}
 	}
 }

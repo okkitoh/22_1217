@@ -12,6 +12,7 @@ namespace _22_1217_ {
 		const int BUFSZ = (1024*1024)/2;
 		FileStream? fHandle;
 		Dictionary<string, int> frequency = new Dictionary<string, int>();
+		object sharedLock = new object();
 		
 		public ThreadedRipper() {
 			fHandle = null;
@@ -26,7 +27,9 @@ namespace _22_1217_ {
 				if(fHandle == null) {
 					return frequency;
 				}
-					
+				
+				List<ManualResetEvent> mreQueue = new List<ManualResetEvent>();
+				
 				Encoding ASCII_ENCODE = new ASCIIEncoding();
 				int head = 0;
 				int fseek = 0;
@@ -38,31 +41,44 @@ namespace _22_1217_ {
 					if(fseek >= BUFSZ) {
 						_getNextRToken(text, ref adjustedLen);
 					}
+
+					ManualResetEvent mre = new ManualResetEvent(false);
+					mreQueue.Add(mre);
 					//ThreadPool.QueueUserWorkItem(RipperWork, text.Substring(0, adjustedLen)); #need a custom AutoResetEvent
-					synchronousRipperWork(text.Substring(0, adjustedLen)); /* creating new buffer but this will be necessary for threads */
+					ThreadPool.QueueUserWorkItem(new WaitCallback(ripperWork), new RipperState(text.Substring(0, adjustedLen), mre));
+					//synchronousRipperWork(text.Substring(0, adjustedLen)); /* creating new buffer but this will be necessary for threads */
 					head = head + adjustedLen;
 					fHandle.Position = head;
 					BUF = new byte[BUFSZ];
 				}
+				WaitHandle.WaitAll(mreQueue.ToArray());
 				return frequency;
 			});
 		}
 
-
-		private void synchronousRipperWork(string text) {
+		private void ripperWork(object? state) {
+			RipperState rstate = (RipperState)state;
+			string text = rstate.text;
 			int tseek = 0;
-			string? token = _getNextToken(text, ref tseek);
-			while (token != null) {
-				tallyWord(token);
-				token = _getNextToken(text,ref tseek);
+			string? token;
+			Dictionary<string, int> freqCount = new Dictionary<string, int>();
+			while((token = _getNextToken(text, ref tseek)) != null) {
+				if(freqCount.ContainsKey(token)) {
+					freqCount[token]+= 1;
+				} else {
+					freqCount[token] = 1;
+				}
 			}
-		}
-		private void tallyWord(string token) {
-			if(this.frequency.ContainsKey(token)) {
-				this.frequency[token]+= 1;
-			} else {
-				this.frequency[token] = 1;
+			lock(sharedLock) {
+				foreach(KeyValuePair<string, int> kv in freqCount) {
+					if (frequency.ContainsKey(kv.Key)) {
+						frequency[kv.Key]+= kv.Value;
+					} else {
+						frequency[kv.Key] = kv.Value;
+					}
+				}
 			}
+			rstate.mre.Set();
 		}
 
 		/* FUNCTION: _getNextToken(string, int *)
@@ -122,6 +138,16 @@ namespace _22_1217_ {
 		
 		public static bool isAlphaNum(char c) {
 			return !(c < 48 || c > 57 && c < 65 || c > 90 && c < 97 || c > 122);
+		}
+	}
+
+	class RipperState {
+		public string text;
+		public ManualResetEvent mre;
+
+		public RipperState(string text, ManualResetEvent mre) {
+			this.text = text;
+			this.mre = mre;
 		}
 	}
 }
